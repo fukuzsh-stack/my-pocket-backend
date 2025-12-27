@@ -2,3 +2,5 @@ fastapi
 uvicorn
 newspaper3k
 supabase
+lxml_html_clean
+
