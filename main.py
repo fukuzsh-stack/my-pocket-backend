@@ -1,130 +1,101 @@
 import os
-from fastapi import FastAPI, Request
+import asyncio
+from typing import List, Optional
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse
-from newspaper import Article, Config
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+import google.generativeai as genai
+from tavily import TavilyClient
 from supabase import create_client, Client
+from newspaper import Article
+
+# --- 設定 ---
+SUPABASE_URL = "https://vdpxribywidmbvwnmplu.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." # 以前のキー
+GEMINI_API_KEY = "AIzaSyAXFni7owoiD2kjwPPvdKej55Tki70vrKw"
+TAVILY_API_KEY = "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"
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
+tavily = TavilyClient(api_key=TAVILY_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 app = FastAPI()
 
-# --- あなたのSupabase情報 ---
-SUPABASE_URL = "https://vdpxribywidmbvwnmplu.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZkcHhyaWJ5d2lkbWJ2d25tcGx1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY4MTkyODgsImV4cCI6MjA4MjM5NTI4OH0.FQgAMLKW7AxPgK-pPO0IC7lrrCTOtzcJ9DNlbqH3pUk"
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-@app.get("/extract")
-def extract_and_save(url: str):
-    try:
-        config = Config()
-        config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-        config.request_timeout = 15
-        article = Article(url, language='ja', config=config)
-        article.download()
-        article.parse()
-        
-        data = {
-            "title": article.title or url,
-            "url": url,
-            "image_url": article.top_image or "",
-            "is_archived": False
-        }
-        supabase.table("articles").insert(data).execute()
-        return {"status": "success"}
-    except:
-        supabase.table("articles").insert({"title": url, "url": url, "is_archived": False}).execute()
-        return {"status": "partial_success"}
-
-@app.post("/archive/{id}")
-def archive_article(id: int):
-    supabase.table("articles").update({"is_archived": True}).eq("id", id).execute()
-    return {"status": "success"}
-
-@app.post("/delete/{id}")
-def delete_article(id: int):
-    supabase.table("articles").delete().eq("id", id).execute()
-    return {"status": "success"}
+# --- プロンプト・関数 ---
+async def get_user_preference():
+    """過去の保存記事から傾向を分析する"""
+    res = supabase.table("articles").select("title").order("created_at", desc=True).limit(20).execute()
+    titles = [r['title'] for r in res.data]
+    prompt = f"以下の記事タイトルリストから、このユーザーの興味関心を3つのキーワードで抽出して: {', '.join(titles)}"
+    response = model.generate_content(prompt)
+    return response.text
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    unread = supabase.table("articles").select("*").eq("is_archived", False).order("created_at", desc=True).execute()
-    archived = supabase.table("articles").select("*").eq("is_archived", True).order("created_at", desc=True).execute()
+    articles = supabase.table("articles").select("*").order("created_at", desc=True).execute().data
     
-    def render_rows(articles, is_archive):
-        html = ""
-        for a in articles:
-            domain = a.get('url', '').split('/')[2] if 'url' in a and '/' in a['url'] else ""
-            img_tag = f'<div class="row-img" style="background-image: url(\'{a["image_url"]}\')"></div>' if a.get('image_url') else '<div class="row-img no-img"></div>'
-            btn = f'<button onclick="action({a["id"]}, \'archive\')" class="btn-check">Done</button>' if not is_archive else ""
-            html += f"""
-            <div class="list-row" id="card-{a['id']}">
-                {img_tag}
-                <div class="row-content">
-                    <div class="row-domain">{domain}</div>
-                    <div class="row-title"><a href="{a['url']}" target="_blank">{a['title']}</a></div>
-                </div>
-                <div class="row-actions">
-                    {btn}
-                    <button onclick="action({a['id']}, \'delete\')" class="btn-delete">×</button>
-                </div>
-            </div>
-            """
-        return html
+    # AIサマリー（最新5件から生成）
+    summary = "AI分析中..."
+    if len(articles) > 0:
+        top_titles = [a['title'] for a in articles[:5]]
+        summary_res = model.generate_content(f"以下の最新記事5件を読み、今日の重要トピックを3行でまとめて:\n" + "\n".join(top_titles))
+        summary = summary_res.text
 
-    return f"""
-    <!DOCTYPE html>
-    <html lang="ja">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            :root {{ --primary: #ef4056; --bg: #ffffff; }}
-            body {{ font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding-top: 50px; color: #333; }}
-            header {{ background: white; height: 45px; position: fixed; top: 0; width: 100%; display: flex; border-bottom: 1px solid #eee; z-index: 100; }}
-            .tabs {{ display: flex; width: 100%; justify-content: center; gap: 40px; }}
-            .tab {{ color: #999; padding: 12px 0; font-weight: bold; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }}
-            .tab.active {{ color: var(--primary); border-bottom-color: var(--primary); }}
-            
-            /* スリムな1列リスト表示 */
-            .list-row {{ 
-                display: flex; 
-                align-items: center; 
-                padding: 10px 15px; 
-                border-bottom: 1px solid #f0f0f0; 
-                gap: 12px;
-            }}
-            .row-img {{ width: 50px; height: 50px; border-radius: 4px; background-size: cover; background-position: center; flex-shrink: 0; background-color: #f9f9f9; }}
-            .no-img {{ border: 1px solid #eee; }}
-            .row-content {{ flex: 1; min-width: 0; }}
-            .row-domain {{ font-size: 10px; color: #aaa; margin-bottom: 2px; }}
-            .row-title {{ font-size: 14px; line-height: 1.3; font-weight: 500; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }}
-            .row-title a {{ color: #333; text-decoration: none; }}
-            .row-actions {{ display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }}
-            button {{ border: none; background: none; font-weight: bold; cursor: pointer; font-size: 12px; padding: 2px 5px; }}
-            .btn-check {{ color: var(--primary); }}
-            .btn-delete {{ color: #ccc; font-size: 18px; }}
-        </style>
-    </head>
-    <body>
-        <header>
-            <div class="tabs">
-                <div id="t-unread" class="tab active" onclick="show('unread')">MY LIST</div>
-                <div id="t-archive" class="tab" onclick="show('archive')">ARCHIVE</div>
+    # HTML (UI部分)
+    html_content = f"""
+    <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body {{ font-family: sans-serif; background: #f4f4f9; padding: 10px; }}
+                .ai-panel {{ background: #fff; border-radius: 8px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+                .summary-board {{ background: #e3f2fd; border-left: 5px solid #2196f3; padding: 10px; margin-bottom: 15px; font-size: 0.9em; }}
+                .article-row {{ background: #fff; padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; text-decoration: none; color: #333; }}
+                .reason {{ font-size: 0.75em; color: #666; font-style: italic; display: block; }}
+                input, textarea {{ width: 100%; margin-bottom: 10px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }}
+                button {{ background: #2196f3; color: white; border: none; padding: 10px; width: 100%; border-radius: 4px; font-weight: bold; }}
+            </style>
+        </head>
+        <body>
+            <div class="ai-panel">
+                <h3>🤖 今日のAI要約</h3>
+                <div class="summary-board">{summary.replace('\n', '<br>')}</div>
+                <form action="/ai-collect" method="post">
+                    <textarea name="urls" placeholder="参考URLを複数貼り付け（任意）"></textarea>
+                    <input type="number" name="count" value="5" min="1" max="10"> 件検索する
+                    <button type="submit">AIにお任せ収集</button>
+                </form>
             </div>
-        </header>
-        <div id="unread-list">{render_rows(unread.data, False)}</div>
-        <div id="archived-list" style="display:none">{render_rows(archived.data, True)}</div>
-        <script>
-            function show(type) {{
-                document.getElementById('unread-list').style.display = type === 'unread' ? 'block' : 'none';
-                document.getElementById('archived-list').style.display = type === 'archive' ? 'block' : 'none';
-                document.getElementById('t-unread').classList.toggle('active', type === 'unread');
-                document.getElementById('t-archive').classList.toggle('active', type === 'archive');
-            }}
-            async function action(id, type) {{
-                if(!confirm('実行しますか？')) return;
-                await fetch('/' + type + '/' + id, {{ method: 'POST' }});
-                location.reload();
-            }}
-        </script>
-    </body>
+            <h3>📚 MY LIST</h3>
+            {"".join([f'<a href="{a["url"]}" class="article-row"><div>{a["title"]}<span class="reason">{a.get("ai_reason", "")}</span></div></a>' for a in articles])}
+        </body>
     </html>
     """
+    return html_content
+
+@app.post("/ai-collect")
+async def ai_collect(urls: str = Form(...), count: int = Form(...)):
+    # 1. 傾向分析
+    pref = await get_user_preference()
+    
+    # 2. 検索クエリ生成
+    query_prompt = f"ユーザーの好み: {pref}\n参考URL: {urls}\nこれらを元に、今探すべき最新記事の検索クエリを1つ作って。"
+    query = model.generate_content(query_prompt).text
+    
+    # 3. Tavilyで検索
+    search_res = tavily.search(query=query, max_results=count)
+    
+    # 4. 保存
+    for res in search_res['results']:
+        # 選定理由を生成
+        reason_res = model.generate_content(f"記事『{res['title']}』を、ユーザーの好み『{pref}』に基づいて選んだ理由を1行で説明して。")
+        supabase.table("articles").insert({{
+            "title": res['title'],
+            "url": res['url'],
+            "ai_reason": reason_res.text,
+            "is_archived": False
+        }}).execute()
+        
+    return HTMLResponse("<script>alert('収集完了！'); window.location.href='/';</script>")
