@@ -18,7 +18,7 @@ def initialize_clients():
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     genai.configure(api_key=GEMINI_API_KEY)
     tavily = TavilyClient(api_key=TAVILY_API_KEY)
-    # モデル名を修正（404エラー対策）
+    # 404エラー対策：'models/' を含めない名前を指定
     model = genai.GenerativeModel('gemini-1.5-flash')
     return supabase, model, tavily
 
@@ -31,18 +31,19 @@ def get_html_layout(content: str, active_tab: str):
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
-                body {{ font-family: -apple-system, sans-serif; background: #f2f2f7; margin: 0; }}
-                .nav {{ background: white; display: flex; justify-content: space-around; padding: 15px 0; position: sticky; top: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+                body {{ font-family: -apple-system, sans-serif; background: #f2f2f7; margin: 0; padding-bottom: 50px; }}
+                .nav {{ background: white; display: flex; justify-content: space-around; padding: 15px 0; position: sticky; top: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); z-index: 100; }}
                 .nav a {{ text-decoration: none; color: #8e8e93; font-size: 14px; padding: 5px 10px; }}
                 .container {{ max-width: 600px; margin: 20px auto; padding: 0 15px; }}
                 .card {{ background: white; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }}
-                .ai-summary {{ background: #f0f7ff; border-left: 4px solid #007aff; padding: 12px; font-size: 14px; margin-bottom: 15px; border-radius: 4px; }}
+                .ai-summary {{ background: #f0f7ff; border-left: 4px solid #007aff; padding: 12px; font-size: 14px; margin-bottom: 15px; border-radius: 4px; color: #333; }}
                 .article-title {{ display: block; font-weight: 600; color: #1c1c1e; text-decoration: none; margin-bottom: 4px; font-size: 17px; }}
                 .ai-reason {{ font-size: 12px; color: #8e8e93; display: block; margin-bottom: 12px; }}
                 .actions {{ display: flex; gap: 12px; }}
                 .btn {{ border: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; }}
                 .btn-archive {{ background: #e5e5ea; color: #007aff; }}
                 .btn-delete {{ background: #ffe5e5; color: #ff3b30; }}
+                .btn-restore {{ background: #e1f5fe; color: #0288d1; }}
                 textarea {{ width: 100%; border: 1px solid #d1d1d6; border-radius: 8px; padding: 10px; margin: 10px 0; font-size: 14px; box-sizing: border-box; }}
                 .btn-main {{ background: #007aff; color: white; width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: 600; }}
             </style>
@@ -69,7 +70,8 @@ async def index():
             titles = [a.get('title', '無題') for a in articles[:5]]
             summary_res = model.generate_content("以下を3行でまとめて:\n" + "\n".join(titles))
             summary = summary_res.text
-        except: summary = "要約の生成に失敗しました。"
+        except: 
+            summary = "AI要約を生成できませんでした。"
 
     items_html = f"""
     <div class="card">
@@ -85,7 +87,7 @@ async def index():
         items_html += f"""
         <div class="card">
             <a href="{a.get('url', '#')}" target="_blank" class="article-title">{a.get('title', '無題')}</a>
-            <span class="ai-reason">💡 {a.get('ai_reason', 'AIおすすめ')}</span>
+            <span class="ai-reason">💡 {a.get('ai_reason') or 'AIおすすめ'}</span>
             <div class="actions">
                 <form action="/archive/{a['id']}" method="post" style="margin:0;">
                     <button type="submit" class="btn btn-archive">アーカイブ</button>
@@ -105,13 +107,15 @@ async def archived_page():
     articles = res.data or []
     
     items_html = "<h3>アーカイブ済み</h3>"
+    if not articles:
+        items_html += "<p style='color:#999;'>アーカイブされた記事はありません。</p>"
     for a in articles:
         items_html += f"""
         <div class="card" style="opacity: 0.8;">
             <a href="{a.get('url', '#')}" target="_blank" class="article-title">{a.get('title', '無題')}</a>
             <div class="actions">
                 <form action="/unarchive/{a['id']}" method="post" style="margin:0;">
-                    <button type="submit" class="btn btn-archive">戻す</button>
+                    <button type="submit" class="btn btn-restore">リストに戻す</button>
                 </form>
                 <form action="/delete/{a['id']}" method="post" style="margin:0;"><button type="submit" class="btn btn-delete">削除</button></form>
             </div>
@@ -119,7 +123,7 @@ async def archived_page():
         """
     return get_html_layout(items_html, "archive")
 
-# --- 命令（ルート）の追加 ---
+# --- アクション用ルート（パス修正済み） ---
 @app.post("/archive/{{article_id}}")
 async def archive_article(article_id: int):
     supabase, _, _ = initialize_clients()
@@ -142,18 +146,19 @@ async def delete_article(article_id: int):
 async def ai_collect(urls: str = Form(""), count: int = Form(5)):
     try:
         supabase, model, tavily = initialize_clients()
+        # 過去のタイトルから競馬などの好みを分析
         res = supabase.table("articles").select("title").order("created_at", desc=True).limit(5).execute()
         pref = ",".join([r['title'] for r in res.data]) if res.data else "競馬 予想 AI"
         
-        # 検索クエリ作成
-        query_res = model.generate_content(f"ユーザーの興味: {pref} URL: {urls} に基づく検索語を1つ作って")
+        query_res = model.generate_content(f"ユーザーの興味: {pref} URL: {urls} に基づく最新情報の検索クエリを1つ作って")
         search_results = tavily.search(query=query_res.text, max_results=count)
         
         for item in search_results['results']:
             reason = model.generate_content(f"『{item['title']}』を選んだ理由を20文字以内で")
             supabase.table("articles").insert({{
-                "title": item['title'], "url": item['url'], "ai_reason": reason.text.strip(), "is_archived": False
+                "title": item['title'], "url": item['url'], 
+                "ai_reason": reason.text.strip(), "is_archived": False
             }}).execute()
         return RedirectResponse(url="/", status_code=303)
     except:
-        return HTMLResponse(content=f"<h3>AIサーチ中にエラーが発生しました</h3><pre>{traceback.format_exc()}</pre>")
+        return HTMLResponse(content=f"<h3>エラー発生</h3><pre>{traceback.format_exc()}</pre>")
