@@ -5,3 +5,4 @@ supabase
 lxml_html_clean
 google-generativeai
 tavily-python
+python-multipart
