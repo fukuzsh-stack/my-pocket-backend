@@ -12,7 +12,7 @@ from newspaper import Article
 
 # --- 設定 ---
 SUPABASE_URL = "https://vdpxribywidmbvwnmplu.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." # 以前のキー
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZkcHhyaWJ5d2lkbWJ2d25tcGx1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY4MTkyODgsImV4cCI6MjA4MjM5NTI4OH0.FQgAMLKW7AxPgK-pPO0IC7lrrCTOtzcJ9DNlbqH3pUk"
 GEMINI_API_KEY = "AIzaSyAXFni7owoiD2kjwPPvdKej55Tki70vrKw"
 TAVILY_API_KEY = "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"
 
