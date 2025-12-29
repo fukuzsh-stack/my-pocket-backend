@@ -7,7 +7,7 @@ from tavily import TavilyClient
 from supabase import create_client, Client
 from newspaper import Article, Config
 
-# --- 設定 ---
+# --- 設定（環境変数） ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -23,7 +23,33 @@ def initialize_clients():
     model = genai.GenerativeModel('gemini-1.5-flash')
     return supabase, model, tavily
 
-# UIテンプレート
+# --- 【最重要】ショートカットからの保存窓口 (/extract) ---
+@app.get("/extract")
+async def extract_and_save(url: str = Query(...)):
+    supabase, _, _ = initialize_clients()
+    try:
+        config = Config()
+        config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+        config.request_timeout = 15
+        article = Article(url, language='ja', config=config)
+        article.download()
+        article.parse()
+        
+        data = {
+            "title": article.title or url,
+            "url": url,
+            "is_archived": False,
+            "ai_reason": "Safariから保存"
+        }
+        supabase.table("articles").insert(data).execute()
+        # 保存完了時にブラウザを閉じるためのHTMLを返す
+        return HTMLResponse("<html><body onload='window.close()'>保存完了</body></html>")
+    except Exception as e:
+        # 失敗してもURLだけは保存する
+        supabase.table("articles").insert({"title": url, "url": url, "is_archived": False, "ai_reason": "保存エラー(URLのみ)"}).execute()
+        return RedirectResponse(url="/", status_code=303)
+
+# UIレイアウト（Pocket風）
 def get_html_layout(content: str, active_tab: str):
     home_style = "border-bottom: 3px solid #ef4056; font-weight: bold; color: #ef4056;" if active_tab == "home" else ""
     archive_style = "border-bottom: 3px solid #ef4056; font-weight: bold; color: #ef4056;" if active_tab == "archive" else ""
@@ -45,30 +71,6 @@ def get_html_layout(content: str, active_tab: str):
         </body>
     </html>
     """
-
-# --- 【最重要】以前の確実な保存機能を復活 ---
-@app.get("/extract")
-async def extract_and_save(url: str = Query(...)):
-    supabase, _, _ = initialize_clients()
-    try:
-        config = Config()
-        config.browser_user_agent = 'Mozilla/5.0'
-        config.request_timeout = 15
-        article = Article(url, language='ja', config=config)
-        article.download()
-        article.parse()
-        
-        data = {
-            "title": article.title or url,
-            "url": url,
-            "is_archived": False,
-            "ai_reason": "Safariから保存"
-        }
-        supabase.table("articles").insert(data).execute()
-        return HTMLResponse("<html><body onload='window.close()'>保存完了</body></html>")
-    except:
-        supabase.table("articles").insert({"title": url, "url": url, "is_archived": False, "ai_reason": "URL直接保存"}).execute()
-        return RedirectResponse(url="/", status_code=303)
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -128,7 +130,7 @@ async def ai_collect(urls: str = Form(""), count: int = Form(5)):
     try:
         supabase, model, tavily = initialize_clients()
         res = supabase.table("articles").select("title").order("created_at", desc=True).limit(5).execute()
-        pref = ",".join([r['title'] for r in res.data]) if res.data else "競馬"
+        pref = ",".join([r['title'] for r in res.data]) if res.data else "最新ニュース"
         query_res = model.generate_content(f"関心:{pref} に基づく最新情報の検索クエリを1つ作って")
         search_results = tavily.search(query=query_res.text + " " + urls, max_results=count)
         for item in search_results['results']:
