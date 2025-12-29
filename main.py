@@ -1,4 +1,4 @@
-import os
+import os # Fix Safari and AI
 import traceback
 from fastapi import FastAPI, Request, Form, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
