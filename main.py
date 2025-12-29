@@ -6,9 +6,10 @@ from supabase import create_client, Client
 
 app = FastAPI()
 
-# --- あなたのSupabase情報（直書きで確実に繋ぎます） ---
+# --- あなたのSupabase情報（直書きで確実に接続） ---
 SUPABASE_URL = "https://vdpxribywidmbvwnmplu.supabase.co"
-SUPABASE_KEY = os.getenv("SUPABASE_KEY") # RenderのEnvironment Variablesに設定してあるもの
+# Supabase KeyはRenderのEnvironment Variablesにあるものを使用
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 @app.get("/extract")
@@ -28,8 +29,10 @@ async def extract_and_save(url: str = Query(...)):
             "is_archived": False
         }
         supabase.table("articles").insert(data).execute()
+        # iPhoneショートカット向けに小さな成功画面を返す
         return HTMLResponse("<html><body onload='window.close()'>保存完了</body></html>")
     except:
+        # 解析に失敗してもURLだけは保存する
         supabase.table("articles").insert({"title": url, "url": url, "is_archived": False}).execute()
         return RedirectResponse(url="/", status_code=303)
 
@@ -45,6 +48,7 @@ async def delete_article(id: int):
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    # 未読記事のみを取得
     unread = supabase.table("articles").select("*").eq("is_archived", False).order("created_at", desc=True).execute()
     
     html_rows = ""
@@ -55,8 +59,8 @@ async def index(request: Request):
                 <a href="{a['url']}" target="_blank" style="color:#333; text-decoration:none;">{a['title']}</a>
             </div>
             <div style="display:flex; gap:15px;">
-                <form action="/archive/{a['id']}" method="post"><button style="color:#ef4056; background:none; border:none; font-weight:bold;">完了</button></form>
-                <form action="/delete/{a['id']}" method="post"><button style="color:#ccc; background:none; border:none;">削除</button></form>
+                <form action="/archive/{a['id']}" method="post"><button style="color:#ef4056; background:none; border:none; font-weight:bold; cursor:pointer;">完了</button></form>
+                <form action="/delete/{a['id']}" method="post"><button style="color:#ccc; background:none; border:none; cursor:pointer;">削除</button></form>
             </div>
         </div>
         """
@@ -65,8 +69,8 @@ async def index(request: Request):
     <html>
         <head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
         <body style="font-family:-apple-system, sans-serif; background:#f9f9f9; padding:20px;">
-            <h2 style="color:#ef4056;">MY LIST</h2>
-            {html_rows}
+            <h2 style="color:#ef4056; border-bottom:2px solid #ef4056; padding-bottom:10px;">MY LIST</h2>
+            {html_rows if html_rows else "<p style='color:#999;'>記事はありません</p>"}
         </body>
     </html>
     """
