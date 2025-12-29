@@ -1,9 +1,6 @@
 fastapi
 uvicorn
-google-generativeai
-tavily-python
 supabase
 newspaper3k
-lxml[html_clean]
 lxml_html_clean
 python-multipart
