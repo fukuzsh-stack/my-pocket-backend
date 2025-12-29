@@ -5,3 +5,4 @@ google-generativeai>=0.8.3
 tavily-python
 python-multipart
 newspaper3k
+lxml_html_clean
