@@ -36,7 +36,7 @@ def get_layout(content: str, active_tab: str):
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <style>
-            :root {{ --primary: #ef4056; --bg: #ffffff; --line: #f2f2f7; --text: #1c1c1e; --sub: #8e8e93; --delete: #8e8e93; }}
+            :root {{ --primary: #ef4056; --bg: #ffffff; --line: #f2f2f7; --text: #1c1c1e; --sub: #8e8e93; }}
             body {{ font-family: -apple-system, sans-serif; background: #f2f2f7; margin: 0; padding-top: 50px; color: var(--text); }}
             header {{ background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); position: fixed; top: 0; width: 100%; height: 50px; display: flex; border-bottom: 0.5px solid #d1d1d6; z-index: 100; }}
             .tabs {{ display: flex; width: 100%; justify-content: center; gap: 40px; }}
@@ -49,9 +49,9 @@ def get_layout(content: str, active_tab: str):
             .item-title {{ font-size: 14px; font-weight: 500; line-height: 1.4; }}
             .item-title a {{ color: var(--text); text-decoration: none; }}
             .actions {{ display: flex; flex-direction: column; gap: 6px; }}
-            .btn {{ border: none; font-size: 10px; font-weight: 700; padding: 6px 10px; border-radius: 6px; cursor: pointer; text-align: center; text-decoration: none; }}
+            .btn {{ border: none; font-size: 10px; font-weight: 700; padding: 6px 10px; border-radius: 6px; cursor: pointer; text-align: center; }}
             .btn-done {{ color: white; background: var(--primary); }}
-            .btn-delete {{ color: white; background: var(--delete); }}
+            .btn-delete {{ color: white; background: #8e8e93; }}
             .btn-restore {{ color: white; background: #34c759; }}
         </style>
     </head>
@@ -83,6 +83,7 @@ async def extract_and_save(url: str = Query(...)):
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
+    if not supabase: return HTMLResponse("Database Error")
     res = supabase.table("articles").select("*").eq("is_archived", False).order("created_at", desc=True).execute()
     articles = res.data or []
     rows = ""
@@ -112,6 +113,7 @@ async def index():
 
 @app.get("/archived", response_class=HTMLResponse)
 async def archived_page():
+    if not supabase: return HTMLResponse("Database Error")
     res = supabase.table("articles").select("*").eq("is_archived", True).order("created_at", desc=True).execute()
     articles = res.data or []
     rows = ""
@@ -143,7 +145,8 @@ async def archived_page():
 async def update_status(id: int, status: str = Form(...)):
     new_status = True if status == "archive" else False
     supabase.table("articles").update({"is_archived": new_status}).eq("id", id).execute()
-    return RedirectResponse(url="/" if status == "restore" else "/archived", status_code=303)
+    # 復元した時はマイリストへ、完了した時はアーカイブへ移動
+    return RedirectResponse(url="/archived" if status == "archive" else "/", status_code=303)
 
 @app.post("/delete-article/{id}")
 async def delete_article(id: int, request: Request):
