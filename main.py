@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timezone
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request, Query, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from newspaper import Article, Config
 from supabase import create_client, Client
