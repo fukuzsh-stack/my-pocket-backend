@@ -48,8 +48,8 @@ def get_layout(content: str, active_tab: str):
             .item-meta {{ font-size: 10px; font-weight: 700; color: var(--sub); margin-bottom: 2px; display: flex; align-items: center; gap: 4px; }}
             .item-title {{ font-size: 14px; font-weight: 500; line-height: 1.4; }}
             .item-title a {{ color: var(--text); text-decoration: none; }}
-            .actions {{ display: flex; flex-direction: column; gap: 6px; }}
-            .btn {{ border: none; font-size: 10px; font-weight: 700; padding: 6px 10px; border-radius: 6px; cursor: pointer; text-align: center; }}
+            .actions {{ display: flex; flex-direction: column; gap: 6px; min-width: 60px; }}
+            .btn {{ border: none; font-size: 10px; font-weight: 700; padding: 6px 10px; border-radius: 6px; cursor: pointer; text-align: center; width: 100%; }}
             .btn-done {{ color: white; background: var(--primary); }}
             .btn-delete {{ color: white; background: #8e8e93; }}
             .btn-restore {{ color: white; background: #34c759; }}
@@ -89,7 +89,12 @@ async def index():
     rows = ""
     for a in articles:
         url = a.get('url', '')
-        domain = url.split('/')[2].replace('www.', '') if 'http' in url else 'WEB'
+        domain = 'WEB'
+        try:
+            if url.startswith('http'):
+                domain = url.split('/')[2].replace('www.', '')
+        except:
+            pass
         img_html = f'<img src="{a["image_url"]}" class="thumb">' if a.get('image_url') else '<div style="width:60px;"></div>'
         rows += f"""
         <div class="list-item">
@@ -104,7 +109,7 @@ async def index():
                     <button class="btn btn-done">完了</button>
                 </form>
                 <form action="/delete-article/{a['id']}" method="post">
-                    <button class="btn btn-delete" onclick="return confirm('削除しますか？')">削除</button>
+                    <button class="btn btn-delete" onclick="return confirm('本当に削除しますか？')">削除</button>
                 </form>
             </div>
         </div>
@@ -119,7 +124,12 @@ async def archived_page():
     rows = ""
     for a in articles:
         url = a.get('url', '')
-        domain = url.split('/')[2].replace('www.', '') if 'http' in url else 'WEB'
+        domain = 'WEB'
+        try:
+            if url.startswith('http'):
+                domain = url.split('/')[2].replace('www.', '')
+        except:
+            pass
         img_html = f'<img src="{a["image_url"]}" class="thumb">' if a.get('image_url') else '<div style="width:60px;"></div>'
         rows += f"""
         <div class="list-item">
@@ -129,12 +139,12 @@ async def archived_page():
                 <div class="item-title"><a href="{a['url']}" target="_blank">{a['title']}</a></div>
             </div>
             <div class="actions">
-                <form action="/update-status/{a['id']}" method="post" style="display:inline;">
+                <form action="/update-status/{a['id']}" method="post">
                     <input type="hidden" name="status" value="restore">
                     <button class="btn btn-restore">復元</button>
                 </form>
-                <form action="/delete-article/{a['id']}" method="post" style="display:inline;">
-                    <button class="btn btn-delete">削除</button>
+                <form action="/delete-article/{a['id']}" method="post">
+                    <button class="btn btn-delete" onclick="return confirm('アーカイブから完全に削除しますか？')">削除</button>
                 </form>
             </div>
         </div>
@@ -145,8 +155,8 @@ async def archived_page():
 async def update_status(id: int, status: str = Form(...)):
     new_status = True if status == "archive" else False
     supabase.table("articles").update({"is_archived": new_status}).eq("id", id).execute()
-    # 復元した時はマイリストへ、完了した時はアーカイブへ移動
-    return RedirectResponse(url="/archived" if status == "archive" else "/", status_code=303)
+    # 処理後に元の画面へリダイレクト
+    return RedirectResponse(url="/" if status == "restore" else "/archived", status_code=303)
 
 @app.post("/delete-article/{id}")
 async def delete_article(id: int, request: Request):
